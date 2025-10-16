@@ -4,7 +4,14 @@ DATA_DIR=logs
 
 install:
 	$(PYTHON) -m venv .venv
-	. .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
+	. .venv/bin/activate && \
+	if [ -n "$$WHEEL_DIR" ]; then \
+		pip install --no-index --find-links "$$WHEEL_DIR" pip setuptools wheel && \
+		pip install --no-index --find-links "$$WHEEL_DIR" -r requirements.txt; \
+	else \
+		pip install --upgrade pip && \
+		pip install -r requirements.txt; \
+	fi
 
 scan:
 	. .venv/bin/activate && $(PYTHON) scanner/nmap_scan.py --config $(CONFIG)

@@ -63,6 +63,26 @@ trusted_ai_soc_lite/
    make install
    ```
 
+   <details>
+   <summary>Installing without internet access</summary>
+
+   1. On a machine with internet, download the required wheels:
+
+      ```bash
+      pip download -r requirements.txt -d wheels/
+      ```
+
+   2. Copy the `wheels/` directory to this project and point `make install` to it:
+
+      ```bash
+      WHEEL_DIR=./wheels make install
+      ```
+
+   The Makefile will install `pip`, `setuptools`, `wheel`, and all project dependencies from the provided directory without
+   contacting PyPI.
+
+   </details>
+
 4. **Run a scan and train the model**
 
    ```bash
