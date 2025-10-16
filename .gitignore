@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+logs/audit.json
+logs/wazuh_events.ndjson
+logs/scans/*
+!logs/scans/.gitkeep
+logs/explanations/*
+!logs/explanations/.gitkeep
+logs/parsed.csv
+*.pyc
+.env

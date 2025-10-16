@@ -1,0 +1,9 @@
+<decoders>
+  <decoder name="trusted_ai_soc">
+    <program_name>trusted_ai_soc</program_name>
+  </decoder>
+
+  <decoder name="trusted_ai_soc_xai" parent="trusted_ai_soc">
+    <prematch>"type":"xai_explanation"</prematch>
+  </decoder>
+</decoders>
