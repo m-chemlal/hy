@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  trusted-ai-soc:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env.example
+    volumes:
+      - ../logs:/app/logs
+      - ../config:/app/config
+    depends_on:
+      - wazuh-manager
+    ports:
+      - "8501:8501"
+
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.7.2
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      - discovery.type=single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - wazuh-indexer-data:/var/lib/opensearch
+
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.7.2
+    depends_on:
+      - wazuh-indexer
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+    ports:
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "55000:55000"
+    volumes:
+      - wazuh-manager-etc:/var/ossec/etc
+      - ../logs:/var/trusted-ai-soc/logs
+      - ../integration/wazuh:/var/ossec/etc/shared/trusted-ai-soc:ro
+
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.7.2
+    depends_on:
+      - wazuh-indexer
+      - wazuh-manager
+    ports:
+      - "5601:5601"
+    environment:
+      - OPENSEARCH_URL=https://wazuh-indexer:9200
+      - WAZUH_API_URL=https://wazuh-manager:55000
+      - DASHBOARD_USERNAME=admin
+      - DASHBOARD_PASSWORD=SecretPassword
+
+volumes:
+  wazuh-indexer-data:
+  wazuh-manager-etc:

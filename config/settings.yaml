@@ -1,0 +1,35 @@
+# Global configuration for TRUSTED AI SOC LITE
+scheduler:
+  scan_interval_minutes: 30
+  retrain_interval_hours: 24
+
+scanner:
+  targets:
+    - "192.168.1.0/24"
+  nmap_args:
+    - "-sV"
+    - "-O"
+    - "--top-ports"
+    - "100"
+  output_dir: "logs/scans"
+
+ai_engine:
+  model_path: "ai_engine/models/isolation_forest.pkl"
+  feature_store: "logs/feature_store.parquet"
+  explanation_dir: "logs/explanations"
+  anomaly_threshold: 0.6
+
+response:
+  email:
+    enabled: true
+    smtp_server: "smtp.example.com"
+    smtp_port: 587
+    username: "soc@example.com"
+    recipient: "analyst@example.com"
+  firewall:
+    enabled: true
+    backend: "ufw"
+
+audit:
+  audit_log: "logs/audit.json"
+  wazuh_event_log: "logs/wazuh_events.ndjson"
