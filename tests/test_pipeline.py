@@ -84,6 +84,28 @@ class PipelineIntegrationTest(unittest.TestCase):
         self.assertEqual(severities, {"info"})
         self.assertEqual(predictions, {False})
 
+    def test_training_handles_missing_dataset(self) -> None:
+        missing_csv = self.tmp_path / "missing.csv"
+
+        model_path = train_model(missing_csv, self.config_path)
+        self.assertTrue(model_path.exists())
+
+        baseline = json.loads(model_path.read_text(encoding="utf-8"))
+        self.assertTrue(baseline["metadata"]["fallback"])
+        self.assertEqual(baseline["totals"]["records"], 0)
+
+    def test_detection_with_missing_csv_creates_empty_report(self) -> None:
+        model_path = train_model(self.data_path, self.config_path)
+        self.assertTrue(model_path.exists())
+
+        missing_csv = self.tmp_path / "missing.csv"
+        detections_path = detect(missing_csv, self.config_path)
+        detections = json.loads(detections_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(detections["metadata"]["records_scored"], 0)
+        self.assertFalse(detections["metadata"]["fallback_mode"])
+        self.assertIn("note", detections["metadata"])
+
 
 if __name__ == "__main__":
     unittest.main()

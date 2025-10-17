@@ -17,6 +17,9 @@ from config.loader import load_settings
 
 
 def read_csv_rows(path: Path) -> Iterable[Dict[str, str]]:
+    if not path.exists():
+        return []
+
     with path.open("r", encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
@@ -87,8 +90,13 @@ def train_model(data_path: Path, settings_path: Path) -> Path:
 
     rows = list(read_csv_rows(data_path))
     if not rows:
+        if not data_path.exists():
+            print(
+                f"Training data {data_path} not found. Generated fallback baseline."
+            )
+        else:
+            print(f"No records found in {data_path}. Generated fallback baseline.")
         baseline = _empty_baseline()
-        print(f"No records found in {data_path}. Generated fallback baseline.")
     else:
         baseline = build_baseline(rows)
 

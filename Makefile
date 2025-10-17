@@ -20,7 +20,12 @@ scan:
 	$(ACTIVATE) $(PYTHON) scanner/nmap_scan.py --config $(CONFIG)
 
 parse:
-	$(ACTIVATE) latest=$$(ls -t logs/scans | head -n1) && $(PYTHON) scanner/parse_results.py logs/scans/$$latest --output logs/parsed.csv
+        latest=$$(ls -t logs/scans 2>/dev/null | head -n1); \
+        if [ -z "$$latest" ]; then \
+                echo "No scan artifacts found. Run 'make scan' first."; \
+                exit 1; \
+        fi; \
+        $(ACTIVATE) $(PYTHON) scanner/parse_results.py logs/scans/$$latest --output logs/parsed.csv
 
 train:
 	$(ACTIVATE) $(PYTHON) ai_engine/train_model.py logs/parsed.csv --config $(CONFIG)
@@ -29,7 +34,12 @@ detect:
 	$(ACTIVATE) $(PYTHON) ai_engine/detect_anomalies.py logs/parsed.csv --config $(CONFIG)
 
 xai:
-	$(ACTIVATE) latest=$$(ls -t logs/explanations/detections_*.json | head -n1) && $(PYTHON) ai_engine/xai_explain.py logs/parsed.csv $$latest --config $(CONFIG)
+        latest=$$(ls -t logs/explanations/detections_*.json 2>/dev/null | head -n1); \
+        if [ -z "$$latest" ]; then \
+                echo "No detections found. Run 'make detect' first."; \
+                exit 1; \
+        fi; \
+        $(ACTIVATE) $(PYTHON) ai_engine/xai_explain.py logs/parsed.csv logs/explanations/$$latest --config $(CONFIG)
 
 dashboard:
 	$(ACTIVATE) $(PYTHON) dashboard/app.py

@@ -25,6 +25,9 @@ SEVERITY_LEVELS = [
 
 
 def read_csv_rows(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+
     with path.open("r", encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
         return [row for row in reader]
@@ -167,6 +170,11 @@ def detect(data_path: Path, settings_path: Path) -> Path:
             "fallback_mode": fallback_mode,
         },
     }
+
+    if not records:
+        payload["metadata"]["note"] = (
+            "No parsed scan data available; generated informational report."
+        )
 
     with output_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)

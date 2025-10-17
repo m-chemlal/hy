@@ -80,10 +80,10 @@ trusted_ai_soc_lite/
 
    ```bash
    make scan        # collects Nmap output (simulated if nmap is missing)
-   make parse       # converts the latest scan to CSV
+   make parse       # converts the latest scan to CSV (warns if no scans exist)
    make train       # trains the statistical baseline
    make detect      # scores the parsed results and writes detections JSON
-   make xai         # generates human-readable explanations
+   make xai         # generates human-readable explanations (after detections)
    # or run everything in one shot:
    make pipeline
    ```

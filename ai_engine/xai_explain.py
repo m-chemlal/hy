@@ -22,6 +22,11 @@ def generate_explanations(data_path: Path, settings_path: Path, detections_path:
     explanation_dir = Path(ai_conf.get("explanation_dir", "logs/explanations"))
     explanation_dir.mkdir(parents=True, exist_ok=True)
 
+    if not detections_path.exists():
+        raise FileNotFoundError(
+            f"Detections file {detections_path} not found. Run 'make detect' first."
+        )
+
     detections = json.loads(detections_path.read_text(encoding="utf-8"))
     logger = AuditLogger(settings_path)
 
