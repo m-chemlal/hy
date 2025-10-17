@@ -1,11 +1,17 @@
 """End-to-end orchestration script for TRUSTED AI SOC LITE."""
 from __future__ import annotations
 
-import argparse
+import sys
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+import argparse
+
+from config.loader import load_settings
 from scanner.nmap_scan import run_scan
-from scanner.parse_results import parse_results
+from scanner.parse_results import parse_results, write_csv
 from ai_engine.train_model import train_model
 from ai_engine.detect_anomalies import detect
 from ai_engine.xai_explain import generate_explanations
@@ -17,7 +23,7 @@ def main() -> None:
         "--config",
         type=Path,
         default=Path("config/settings.yaml"),
-        help="Path to the settings YAML",
+        help="Path to the settings file",
     )
     parser.add_argument(
         "--retrain",
@@ -26,12 +32,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    scan_path = run_scan(args.config)
-    parsed = parse_results(Path(scan_path))
-    parsed_csv = Path("logs/parsed.csv")
-    parsed.to_csv(parsed_csv, index=False)
+    settings = load_settings(args.config)
+    ai_conf = settings.get("ai_engine", {})
+    model_path = Path(ai_conf.get("model_path", "ai_engine/models/baseline_model.json"))
 
-    model_path = Path("ai_engine/models/isolation_forest.pkl")
+    scan_path = run_scan(args.config)
+    records = parse_results(Path(scan_path))
+    parsed_csv = Path("logs/parsed.csv")
+    write_csv(records, parsed_csv)
+
     if args.retrain or not model_path.exists():
         train_model(parsed_csv, args.config)
 

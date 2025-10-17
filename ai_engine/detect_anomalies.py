@@ -1,18 +1,20 @@
-"""Run anomaly detection against parsed scan results."""
+"""Run anomaly detection against parsed scan results using the baseline model."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import argparse
+import csv
 import datetime as dt
 import json
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List, Tuple
 
-import joblib
-import pandas as pd
-import yaml
-
+from config.loader import load_settings
 from logs.audit import AuditLogger
-
 
 SEVERITY_LEVELS = [
     (0.85, "critical"),
@@ -22,9 +24,75 @@ SEVERITY_LEVELS = [
 ]
 
 
-def load_settings(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+def read_csv_rows(path: Path) -> List[Dict[str, Any]]:
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh)
+        return [row for row in reader]
+
+
+def load_model(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Model not found at {path}. Train the model first.")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def score_components(record: Dict[str, Any], model: Dict[str, Any]) -> List[Tuple[str, float, str]]:
+    port_counts = model.get("port_counts", {})
+    service_counts = model.get("service_counts", {})
+    product_counts = model.get("product_counts", {})
+    combo_counts = model.get("combo_counts", {})
+    totals = model.get("totals", {})
+
+    port = str(record.get("port", "0"))
+    service = (record.get("service") or "unknown").lower()
+    product = (record.get("product") or "unknown").lower()
+    combo_key = f"{service}|{port}"
+
+    max_port = max(totals.get("max_port_count", 1), 1)
+    max_service = max(totals.get("max_service_count", 1), 1)
+    max_product = max(totals.get("max_product_count", 1), 1)
+    max_combo = max(totals.get("max_combo_count", 1), 1)
+
+    components: List[Tuple[str, float, str]] = []
+
+    port_freq = port_counts.get(port, 0)
+    if port_freq == 0:
+        components.append(("port", 0.6, f"Port {port} not seen during training"))
+    else:
+        rarity = 1 - (port_freq / max_port)
+        components.append(("port", 0.4 * rarity, f"Port {port} rarity score {rarity:.2f}"))
+
+    service_freq = service_counts.get(service, 0)
+    if service_freq == 0:
+        components.append(("service", 0.5, f"Service '{service}' unseen during training"))
+    else:
+        rarity = 1 - (service_freq / max_service)
+        components.append(("service", 0.3 * rarity, f"Service '{service}' rarity score {rarity:.2f}"))
+
+    product_freq = product_counts.get(product, 0)
+    if product_freq == 0:
+        components.append(("product", 0.3, f"Product '{product}' unseen during training"))
+    else:
+        rarity = 1 - (product_freq / max_product)
+        components.append(("product", 0.2 * rarity, f"Product '{product}' rarity score {rarity:.2f}"))
+
+    combo_freq = combo_counts.get(combo_key, 0)
+    if combo_freq == 0:
+        components.append(("combo", 0.4, f"Combination {service}/{port} never observed"))
+    else:
+        rarity = 1 - (combo_freq / max_combo)
+        components.append(("combo", 0.2 * rarity, f"Combination {service}/{port} rarity {rarity:.2f}"))
+
+    return components
+
+
+def aggregate_score(components: Iterable[Tuple[str, float, str]]) -> Tuple[float, List[Dict[str, Any]]]:
+    explanations = []
+    score = 0.0
+    for feature, value, reason in components:
+        score += value
+        explanations.append({"feature": feature, "impact": round(value, 3), "reason": reason})
+    return min(score, 1.0), explanations
 
 
 def score_to_severity(score: float) -> str:
@@ -37,52 +105,54 @@ def score_to_severity(score: float) -> str:
 def detect(data_path: Path, settings_path: Path) -> Path:
     settings = load_settings(settings_path)
     ai_conf = settings.get("ai_engine", {})
-    model_path = Path(ai_conf.get("model_path", "ai_engine/models/isolation_forest.pkl"))
+    model_path = Path(ai_conf.get("model_path", "ai_engine/models/baseline_model.json"))
     explanation_dir = Path(ai_conf.get("explanation_dir", "logs/explanations"))
     explanation_dir.mkdir(parents=True, exist_ok=True)
 
-    if not model_path.exists():
-        raise FileNotFoundError(
-            f"Model not found at {model_path}. Train the model with ai_engine/train_model.py first."
-        )
+    model = load_model(model_path)
+    records = read_csv_rows(data_path)
 
-    df = pd.read_csv(data_path)
-    pipeline = joblib.load(model_path)
-    decision_scores = pipeline.decision_function(df)
-    anomaly_scores = (decision_scores.max() - decision_scores) / (decision_scores.max() - decision_scores.min() + 1e-6)
-
-    results = df.copy()
-    results["anomaly_score"] = anomaly_scores
-    results["severity"] = results["anomaly_score"].apply(score_to_severity)
-    threshold = ai_conf.get("anomaly_threshold", 0.6)
-    results["prediction"] = results["anomaly_score"] > threshold
-
-    timestamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    output_path = explanation_dir / f"detections_{timestamp}.json"
-    records = results.to_dict(orient="records")
-    with output_path.open("w", encoding="utf-8") as fh:
-        json.dump({"generated_at": timestamp, "detections": records}, fh, indent=2)
-
-    # Audit logging per detection
     logger = AuditLogger(settings_path)
+
+    detections: List[Dict[str, Any]] = []
     for record in records:
-        if record["prediction"]:
+        components = score_components(record, model)
+        anomaly_score, explanation = aggregate_score(components)
+        severity = score_to_severity(anomaly_score)
+        threshold = ai_conf.get("anomaly_threshold", 0.6)
+        prediction = anomaly_score > threshold
+
+        enriched = {
+            **record,
+            "anomaly_score": round(anomaly_score, 3),
+            "severity": severity,
+            "prediction": prediction,
+            "explanation": explanation,
+        }
+        detections.append(enriched)
+
+        if prediction:
             logger.log_event(
                 "anomaly_detected",
                 {
                     "ip": record.get("ip"),
                     "port": record.get("port"),
                     "service": record.get("service"),
-                    "score": record.get("anomaly_score"),
-                    "severity": record.get("severity"),
+                    "score": anomaly_score,
+                    "severity": severity,
                 },
             )
+
+    timestamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    output_path = explanation_dir / f"detections_{timestamp}.json"
+    with output_path.open("w", encoding="utf-8") as fh:
+        json.dump({"generated_at": timestamp, "detections": detections}, fh, indent=2)
 
     return output_path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Detect anomalies using the trained model")
+    parser = argparse.ArgumentParser(description="Detect anomalies using the baseline model")
     parser.add_argument("data", type=Path, help="CSV exported from parse_results")
     parser.add_argument(
         "--config",

@@ -1,12 +1,13 @@
 # TRUSTED AI SOC LITE
 
-Prototype local Security Operations Center (SOC) that combines automated Nmap scans, explainable AI analytics, Wazuh SIEM integration and a realtime dashboard.
+Prototype local Security Operations Center (SOC) that combines automated Nmap scans, explainable analytics, Wazuh SIEM integration and a console dashboard. The project now runs fully offline using only the Python standard library.
 
 ## 📦 Project Structure
 
 ```
 trusted_ai_soc_lite/
 ├── config/
+│   ├── loader.py
 │   └── settings.yaml
 ├── scanner/
 │   ├── nmap_scan.py
@@ -24,7 +25,9 @@ trusted_ai_soc_lite/
 │   ├── wazuh_events.ndjson     # generated
 │   └── scans/                  # generated
 ├── dashboard/
-│   └── streamlit_app.py
+│   └── app.py
+├── scripts/
+│   └── run_pipeline.py
 ├── integration/
 │   └── wazuh/
 │       ├── ossec.local.conf
@@ -35,7 +38,6 @@ trusted_ai_soc_lite/
 ├── docker/
 │   ├── Dockerfile
 │   └── docker-compose.yml
-├── scripts/                    # reserved for automation helpers
 ├── .env.example
 ├── requirements.txt
 ├── Makefile
@@ -63,75 +65,37 @@ trusted_ai_soc_lite/
    make install
    ```
 
-   <details>
-   <summary>Installing without internet access</summary>
+   The core pipeline has no third-party Python dependencies, so the command simply creates a virtual environment. If you keep a custom `requirements.txt`, the Makefile will install the listed wheels when a local cache is provided via `WHEEL_DIR=...`.
 
-   1. On a machine with internet, download the required wheels:
-
-      ```bash
-      pip download -r requirements.txt -d wheels/
-      ```
-
-   2. Copy the `wheels/` directory to this project and point `make install` to it:
-
-      ```bash
-      WHEEL_DIR=./wheels make install
-      ```
-
-   The Makefile will install `pip`, `setuptools`, `wheel`, and all project dependencies from the provided directory without
-   contacting PyPI.
-
-   </details>
-
-4. **Run a scan and train the model**
+4. **Run a scan and score it**
 
    ```bash
    make scan        # collects Nmap output (simulated if nmap is missing)
    make parse       # converts the latest scan to CSV
-   make train       # trains the anomaly detection model
+   make train       # trains the statistical baseline
    make detect      # scores the parsed results and writes detections JSON
-   make xai         # generates XAI explanations for latest detections
+   make xai         # generates human-readable explanations
    # or run everything in one shot:
    make pipeline
    ```
 
-5. **Launch the dashboard**
+5. **View the latest results**
 
    ```bash
-   make streamlit
+   make dashboard
    ```
 
-   Access the UI at [http://localhost:8501](http://localhost:8501).
-
-## 🐳 Docker Deployment
-
-1. **Copy environment template**
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Start the stack**
-
-   ```bash
-   cd docker
-   docker compose up --build
-   ```
-
-   - Streamlit dashboard: `http://localhost:8501`
-   - Wazuh dashboard (Kibana): `https://localhost:5601`
-
-> **Note:** The official Wazuh images require at least 8 GB of RAM. Adjust Java heap sizes in `docker-compose.yml` for constrained environments.
+   The dashboard prints a textual summary of detections, explanations and recent audit events to the terminal.
 
 ## 🔄 Automation Workflow
 
-1. `scanner/nmap_scan.py` collects raw vulnerability data (XML or simulated JSON).
-2. `scanner/parse_results.py` converts scans into tabular features.
-3. `ai_engine/train_model.py` fits an Isolation Forest on accumulated scans.
-4. `ai_engine/detect_anomalies.py` produces anomaly scores, severities and audit events.
-5. `ai_engine/xai_explain.py` enriches detections with SHAP-based explanations.
+1. `scanner/nmap_scan.py` collects raw vulnerability data (XML or simulated JSON when Nmap is unavailable).
+2. `scanner/parse_results.py` converts scans into structured dictionaries and optional CSV output.
+3. `ai_engine/train_model.py` builds a statistical baseline (port/service frequency model) stored as JSON.
+4. `ai_engine/detect_anomalies.py` scores new scans against the baseline, produces severity labels and writes detections JSON while auditing anomalies.
+5. `ai_engine/xai_explain.py` reformats detection explanations for analysts and logs them.
 6. `response/block_ip.py` and `response/notify.py` execute automated defense and alerting.
-7. `dashboard/streamlit_app.py` visualises detections, alerts and audit trail.
+7. `dashboard/app.py` renders a console dashboard for quick situational awareness.
 
 All actions are recorded through `logs/audit.py` in both JSON and NDJSON formats to feed Wazuh.
 
@@ -139,11 +103,11 @@ All actions are recorded through `logs/audit.py` in both JSON and NDJSON formats
 
 - Mount `integration/wazuh` into `/var/ossec/etc/shared/trusted-ai-soc` on the manager.
 - Configure `ossec.local.conf` to tail `/var/trusted-ai-soc/logs/wazuh_events.ndjson`.
-- Decoders and rules included to tag anomaly and response events from the SOC.
+- Decoders and rules are included to tag anomaly and response events from the SOC.
 
 ## ⚙️ Configuration
 
-- `config/settings.yaml` holds all tunables: scan targets, AI thresholds, notification backends, audit file paths.
+- `config/settings.yaml` holds all tunables: scan targets, anomaly thresholds, notification backends and audit file paths.
 - `.env` exposes runtime variables for containers and dashboard credentials.
 
 ## 🧪 Testing the Pipeline
@@ -153,9 +117,9 @@ You can simulate data without Nmap by running:
 ```bash
 python3 scanner/nmap_scan.py --config config/settings.yaml
 python3 scanner/parse_results.py logs/scans/$(ls -t logs/scans | head -n1) --output logs/parsed.csv
-python3 ai_engine/train_model.py logs/parsed.csv
-python3 ai_engine/detect_anomalies.py logs/parsed.csv
-python3 ai_engine/xai_explain.py logs/parsed.csv logs/explanations/$(ls -t logs/explanations/detections_*.json | head -n1)
+python3 ai_engine/train_model.py logs/parsed.csv --config config/settings.yaml
+python3 ai_engine/detect_anomalies.py logs/parsed.csv --config config/settings.yaml
+python3 ai_engine/xai_explain.py logs/parsed.csv logs/explanations/$(ls -t logs/explanations/detections_*.json | head -n1) --config config/settings.yaml
 ```
 
 The fallback simulator will create sample detections which appear in the dashboard.
@@ -164,14 +128,14 @@ The fallback simulator will create sample detections which appear in the dashboa
 
 - Run all Docker containers on an isolated network segment.
 - Replace default credentials and SMTP settings before production use.
-- Review generated SHAP explanations to validate XAI transparency.
+- Review generated explanations to validate anomaly decisions.
 
 ## 📚 Documentation & Deliverables
 
-- **Scripts** for scanning, AI, response, dashboard and audit logging.
+- **Scripts** for scanning, analytics, response, dashboard and audit logging.
 - **Docker assets** for reproducible deployment with Wazuh stack.
 - **Audit trail** persisted in JSON & NDJSON for compliance.
-- **Dashboard** replicating the provided mock (dark mode, metrics, alert stream).
+- **Dashboard** providing textual metrics, alerts and audit history.
 
 ## 🧭 Next Steps / Extensions
 

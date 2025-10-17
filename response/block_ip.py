@@ -1,12 +1,16 @@
 """Simple firewall integration for automatic blocking of IP addresses."""
 from __future__ import annotations
 
-import argparse
-import subprocess
+import sys
 from pathlib import Path
 
-import yaml
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+import argparse
+import subprocess
+
+from config.loader import load_settings
 from logs.audit import AuditLogger
 
 
@@ -14,8 +18,7 @@ SUPPORTED_BACKENDS = {"ufw": ["ufw", "deny"]}
 
 
 def block_ip(ip: str, settings_path: Path = Path("config/settings.yaml")) -> None:
-    with settings_path.open("r", encoding="utf-8") as fh:
-        settings = yaml.safe_load(fh) or {}
+    settings = load_settings(settings_path)
     backend = settings.get("response", {}).get("firewall", {}).get("backend", "ufw")
     command = SUPPORTED_BACKENDS.get(backend)
     logger = AuditLogger(settings_path)
@@ -33,7 +36,7 @@ def block_ip(ip: str, settings_path: Path = Path("config/settings.yaml")) -> Non
             {"ip": ip, "backend": backend, "detail": "Command not available, simulated"},
         )
     except subprocess.CalledProcessError as exc:
-        logger.log_event("response_error", {"ip": ip, "reason": exc.stderr.decode("utf-8") if exc.stderr else str(exc)})
+        logger.log_event("response_error", {"ip": ip, "reason": str(exc)})
         raise
 
 

@@ -1,84 +1,52 @@
-"""Generate explainable AI outputs for anomaly detections."""
+"""Generate explainable outputs for anomaly detections without external dependencies."""
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import argparse
 import json
-from pathlib import Path
 from typing import Any, Dict, List
 
-import joblib
-import numpy as np
-import pandas as pd
-import yaml
-
-try:
-    import shap
-except ImportError:  # pragma: no cover - optional dependency during development
-    shap = None
-
-
+from config.loader import load_settings
 from logs.audit import AuditLogger
 
 
-def load_settings(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
-
-
-def top_contributors(array: np.ndarray, feature_names: List[str], top_k: int = 3) -> List[Dict[str, Any]]:
-    idx = np.argsort(np.abs(array))[::-1][:top_k]
-    return [
-        {"feature": feature_names[i], "impact": float(array[i])}
-        for i in idx
-    ]
-
-
 def generate_explanations(data_path: Path, settings_path: Path, detections_path: Path) -> Path:
+    # Data path is currently unused but kept for interface compatibility
     settings = load_settings(settings_path)
     ai_conf = settings.get("ai_engine", {})
-    model_path = Path(ai_conf.get("model_path", "ai_engine/models/isolation_forest.pkl"))
     explanation_dir = Path(ai_conf.get("explanation_dir", "logs/explanations"))
     explanation_dir.mkdir(parents=True, exist_ok=True)
 
-    pipeline = joblib.load(model_path)
-    df = pd.read_csv(data_path)
     detections = json.loads(detections_path.read_text(encoding="utf-8"))
-
-    preprocessor = pipeline.named_steps["preprocessor"]
-    model = pipeline.named_steps["model"]
-    feature_names = preprocessor.get_feature_names_out()
-    transformed = preprocessor.transform(df)
-    if hasattr(transformed, "toarray"):
-        transformed = transformed.toarray()
-
     logger = AuditLogger(settings_path)
 
-    explanations = []
-    if shap is not None:
-        try:
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(transformed)
-            if isinstance(shap_values, list):
-                shap_values = shap_values[0]
-            for record, shap_row in zip(detections["detections"], shap_values):
-                contributors = top_contributors(shap_row, feature_names)
-                explanation = {**record, "explanation": contributors}
-                explanations.append(explanation)
-                if record.get("prediction"):
-                    logger.log_event("xai_explanation", {"ip": record.get("ip"), "explanation": contributors})
-        except Exception:  # pragma: no cover - fallback when SHAP is unsupported
-            shap_values = None
-
-    if not explanations:
-        # Fallback: use absolute deviations from mean as heuristic
-        baseline = transformed.mean(axis=0)
-        for record, row in zip(detections["detections"], transformed):
-            deviation = row - baseline
-            contributors = top_contributors(deviation, feature_names)
-            explanation = {**record, "explanation": contributors}
-            explanations.append(explanation)
-            if record.get("prediction"):
-                logger.log_event("xai_explanation", {"ip": record.get("ip"), "explanation": contributors})
+    explanations: List[Dict[str, Any]] = []
+    for record in detections.get("detections", []):
+        explanation = record.get("explanation", [])
+        enriched = {
+            "ip": record.get("ip"),
+            "port": record.get("port"),
+            "service": record.get("service"),
+            "severity": record.get("severity"),
+            "prediction": record.get("prediction"),
+            "explanation": explanation,
+        }
+        explanations.append(enriched)
+        if record.get("prediction"):
+            logger.log_event(
+                "xai_explanation",
+                {
+                    "ip": record.get("ip"),
+                    "port": record.get("port"),
+                    "service": record.get("service"),
+                    "explanation": explanation,
+                },
+            )
 
     output_path = explanation_dir / "xai_explanations.json"
     with output_path.open("w", encoding="utf-8") as fh:

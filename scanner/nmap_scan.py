@@ -1,19 +1,19 @@
 """Automated Nmap scanning utilities for TRUSTED AI SOC LITE."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import datetime as dt
 import json
 import subprocess
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
-import yaml
-
-
-def load_settings(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+from config.loader import load_settings
 
 
 def build_command(targets: List[str], nmap_args: List[str], output_file: Path) -> List[str]:
@@ -39,7 +39,7 @@ def run_scan(settings_path: Path) -> Path:
 
     try:
         subprocess.run(command, check=True, capture_output=True)
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         # Provide a graceful fallback in environments without nmap
         simulated_output = {
             "metadata": {
@@ -64,7 +64,7 @@ def run_scan(settings_path: Path) -> Path:
             json.dump(simulated_output, fh, indent=2)
         return json_file
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"Nmap scan failed: {exc.stderr.decode('utf-8')}" ) from exc
+        raise RuntimeError(f"Nmap scan failed: {exc.stderr.decode('utf-8')}") from exc
 
     return output_file
 
