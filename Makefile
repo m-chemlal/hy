@@ -1,38 +1,43 @@
 PYTHON=python3
+VENV=.venv
 CONFIG=config/settings.yaml
-DATA_DIR=logs
+ACTIVATE=. $(VENV)/bin/activate &&
 
 install:
-	$(PYTHON) -m venv .venv
-	. .venv/bin/activate && \
-	if [ -n "$$WHEEL_DIR" ]; then \
-		pip install --no-index --find-links "$$WHEEL_DIR" pip setuptools wheel && \
-		pip install --no-index --find-links "$$WHEEL_DIR" -r requirements.txt; \
-	else \
-		pip install --upgrade pip && \
-		pip install -r requirements.txt; \
-	fi
+	$(PYTHON) -m venv $(VENV)
+	$(ACTIVATE) \
+		if [ -s requirements.txt ] && grep -qEv '^\s*(#|$$)' requirements.txt; then \
+			if [ -n "$$WHEEL_DIR" ]; then \
+				pip install --no-index --find-links "$$WHEEL_DIR" -r requirements.txt; \
+			else \
+				pip install -r requirements.txt; \
+			fi; \
+		else \
+			echo "No Python dependencies to install."; \
+		fi
 
 scan:
-	. .venv/bin/activate && $(PYTHON) scanner/nmap_scan.py --config $(CONFIG)
+	$(ACTIVATE) $(PYTHON) scanner/nmap_scan.py --config $(CONFIG)
 
 parse:
-	. .venv/bin/activate && latest=$$(ls -t logs/scans | head -n1) && $(PYTHON) scanner/parse_results.py logs/scans/$$latest --output logs/parsed.csv
+	$(ACTIVATE) latest=$$(ls -t logs/scans | head -n1) && $(PYTHON) scanner/parse_results.py logs/scans/$$latest --output logs/parsed.csv
 
 train:
-	. .venv/bin/activate && $(PYTHON) ai_engine/train_model.py logs/parsed.csv
+	$(ACTIVATE) $(PYTHON) ai_engine/train_model.py logs/parsed.csv --config $(CONFIG)
 
 detect:
-	. .venv/bin/activate && $(PYTHON) ai_engine/detect_anomalies.py logs/parsed.csv
+	$(ACTIVATE) $(PYTHON) ai_engine/detect_anomalies.py logs/parsed.csv --config $(CONFIG)
 
 xai:
-	. .venv/bin/activate && latest=$$(ls -t logs/explanations/detections_*.json | head -n1) && $(PYTHON) ai_engine/xai_explain.py $$latest
+	$(ACTIVATE) latest=$$(ls -t logs/explanations/detections_*.json | head -n1) && $(PYTHON) ai_engine/xai_explain.py logs/parsed.csv $$latest --config $(CONFIG)
 
-streamlit:
-	. .venv/bin/activate && STREAMLIT_SERVER_PORT=$${STREAMLIT_SERVER_PORT:-8501} streamlit run dashboard/app.py
+dashboard:
+	$(ACTIVATE) $(PYTHON) dashboard/app.py
 
 pipeline:
-	. .venv/bin/activate && $(PYTHON) scripts/run_pipeline.py --config $(CONFIG)
+	$(ACTIVATE) $(PYTHON) scripts/run_pipeline.py --config $(CONFIG)
 
-.PHONY: install scan parse train detect xai streamlit pipeline
+test:
+	$(ACTIVATE) $(PYTHON) -m unittest discover -s tests
 
+.PHONY: install scan parse train detect xai dashboard pipeline test

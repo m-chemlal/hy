@@ -1,59 +1,79 @@
-"""Train the anomaly detection model from parsed Nmap data."""
+"""Train the anomaly detection baseline from parsed Nmap data."""
 from __future__ import annotations
 
-import argparse
+import sys
 from pathlib import Path
-from typing import Any, Dict
 
-import joblib
-import pandas as pd
-import yaml
-from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import IsolationForest
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-NUMERIC_FEATURES = ["port"]
-CATEGORICAL_FEATURES = ["state", "service", "product"]
+import argparse
+import csv
+import json
+from collections import Counter
+from typing import Dict, Iterable, Tuple
 
-
-def load_settings(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+from config.loader import load_settings
 
 
-def build_pipeline() -> Pipeline:
-    transformers = []
-    if NUMERIC_FEATURES:
-        transformers.append(("num", StandardScaler(), NUMERIC_FEATURES))
-    if CATEGORICAL_FEATURES:
-        transformers.append(
-            (
-                "cat",
-                OneHotEncoder(handle_unknown="ignore"),
-                CATEGORICAL_FEATURES,
-            )
-        )
-    preprocessor = ColumnTransformer(transformers)
-    model = IsolationForest(contamination=0.1, n_estimators=200, random_state=42)
-    return Pipeline([("preprocessor", preprocessor), ("model", model)])
+def read_csv_rows(path: Path) -> Iterable[Dict[str, str]]:
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            yield row
+
+
+def build_baseline(rows: Iterable[Dict[str, str]]) -> Dict[str, Dict[str, int]]:
+    port_counts: Counter[str] = Counter()
+    service_counts: Counter[str] = Counter()
+    product_counts: Counter[str] = Counter()
+    combo_counts: Counter[Tuple[str, str]] = Counter()
+
+    total = 0
+    for row in rows:
+        port = str(row.get("port", "0"))
+        service = (row.get("service") or "unknown").lower()
+        product = (row.get("product") or "unknown").lower()
+        port_counts[port] += 1
+        service_counts[service] += 1
+        product_counts[product] += 1
+        combo_counts[(service, port)] += 1
+        total += 1
+
+    return {
+        "totals": {
+            "records": total,
+            "max_port_count": max(port_counts.values(), default=1),
+            "max_service_count": max(service_counts.values(), default=1),
+            "max_product_count": max(product_counts.values(), default=1),
+            "max_combo_count": max(combo_counts.values(), default=1),
+        },
+        "port_counts": dict(port_counts),
+        "service_counts": dict(service_counts),
+        "product_counts": dict(product_counts),
+        "combo_counts": {f"{service}|{port}": count for (service, port), count in combo_counts.items()},
+    }
 
 
 def train_model(data_path: Path, settings_path: Path) -> Path:
     settings = load_settings(settings_path)
     ai_conf = settings.get("ai_engine", {})
-    model_path = Path(ai_conf.get("model_path", "ai_engine/models/isolation_forest.pkl"))
+    model_path = Path(ai_conf.get("model_path", "ai_engine/models/baseline_model.json"))
     model_path.parent.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(data_path)
-    pipeline = build_pipeline()
-    pipeline.fit(df)
-    joblib.dump(pipeline, model_path)
+    rows = list(read_csv_rows(data_path))
+    if not rows:
+        raise ValueError("No data available to train the baseline model.")
+
+    baseline = build_baseline(rows)
+    with model_path.open("w", encoding="utf-8") as fh:
+        json.dump(baseline, fh, indent=2)
+
     return model_path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the isolation forest model")
+    parser = argparse.ArgumentParser(description="Train the baseline anomaly model")
     parser.add_argument("data", type=Path, help="CSV exported from parse_results")
     parser.add_argument(
         "--config",
