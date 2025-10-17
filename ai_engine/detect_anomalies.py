@@ -111,16 +111,29 @@ def detect(data_path: Path, settings_path: Path) -> Path:
 
     model = load_model(model_path)
     records = read_csv_rows(data_path)
+    fallback_mode = model.get("totals", {}).get("records", 0) == 0
 
     logger = AuditLogger(settings_path)
 
     detections: List[Dict[str, Any]] = []
     for record in records:
-        components = score_components(record, model)
-        anomaly_score, explanation = aggregate_score(components)
-        severity = score_to_severity(anomaly_score)
-        threshold = ai_conf.get("anomaly_threshold", 0.6)
-        prediction = anomaly_score > threshold
+        if fallback_mode:
+            anomaly_score = 0.0
+            explanation = [
+                {
+                    "feature": "model",
+                    "impact": 0.0,
+                    "reason": "Baseline trained without data; anomaly scoring disabled.",
+                }
+            ]
+            severity = "info"
+            prediction = False
+        else:
+            components = score_components(record, model)
+            anomaly_score, explanation = aggregate_score(components)
+            severity = score_to_severity(anomaly_score)
+            threshold = ai_conf.get("anomaly_threshold", 0.6)
+            prediction = anomaly_score > threshold
 
         enriched = {
             **record,
@@ -145,8 +158,18 @@ def detect(data_path: Path, settings_path: Path) -> Path:
 
     timestamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     output_path = explanation_dir / f"detections_{timestamp}.json"
+    payload = {
+        "generated_at": timestamp,
+        "detections": detections,
+        "metadata": {
+            "records_scored": len(records),
+            "baseline_records": model.get("totals", {}).get("records", 0),
+            "fallback_mode": fallback_mode,
+        },
+    }
+
     with output_path.open("w", encoding="utf-8") as fh:
-        json.dump({"generated_at": timestamp, "detections": detections}, fh, indent=2)
+        json.dump(payload, fh, indent=2)
 
     return output_path
 

@@ -49,8 +49,17 @@ def generate_explanations(data_path: Path, settings_path: Path, detections_path:
             )
 
     output_path = explanation_dir / "xai_explanations.json"
+    payload = {
+        "explanations": explanations,
+        "metadata": {
+            "source": detections_path.name,
+            "records": len(explanations),
+            "fallback_mode": detections.get("metadata", {}).get("fallback_mode", False),
+        },
+    }
+
     with output_path.open("w", encoding="utf-8") as fh:
-        json.dump({"explanations": explanations}, fh, indent=2)
+        json.dump(payload, fh, indent=2)
 
     return output_path
 

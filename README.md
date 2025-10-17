@@ -88,6 +88,11 @@ trusted_ai_soc_lite/
    make pipeline
    ```
 
+   If the parsed CSV is empty the training step now writes a default baseline
+   so the rest of the pipeline can still execute. In that fallback mode
+   detections are marked informational because the system has no historical
+   data yet.
+
 5. **View the latest results**
 
    ```bash

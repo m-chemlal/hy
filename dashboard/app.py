@@ -22,19 +22,23 @@ def load_json(path: Path, default: Dict | List | None = None):
         return json.load(fh)
 
 
-def render_metrics(detections: List[Dict[str, Any]]) -> str:
+def render_metrics(detections: List[Dict[str, Any]], fallback_mode: bool) -> str:
     total = len(detections)
-    severities: Dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    severities: Dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for det in detections:
         severity = det.get("severity", "low")
         severities[severity] = severities.get(severity, 0) + 1
     lines = ["=== TRUSTED AI SOC LITE ===", f"Detections: {total}"]
-    for level in ["critical", "high", "medium", "low"]:
+    for level in ["critical", "high", "medium", "low", "info"]:
         lines.append(f"  {level.title():<8}: {severities.get(level, 0)}")
+    if fallback_mode:
+        lines.append("  Note: baseline model trained without data (informational scoring).")
     return "\n".join(lines)
 
 
-def render_alerts(detections: List[Dict[str, Any]]) -> str:
+def render_alerts(detections: List[Dict[str, Any]], fallback_mode: bool) -> str:
+    if fallback_mode and detections:
+        return "Model fallback mode: insufficient training data for anomaly scoring."
     if not detections:
         return "No anomalies detected in the latest run."
     lines = ["--- Recent Alerts ---"]
@@ -46,7 +50,9 @@ def render_alerts(detections: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def render_explanations(explanations: List[Dict[str, Any]]) -> str:
+def render_explanations(explanations: List[Dict[str, Any]], fallback_mode: bool) -> str:
+    if fallback_mode:
+        return "Explainability disabled: baseline model has no historical data."
     if not explanations:
         return "No explanations generated yet."
     lines = ["--- Explainability Highlights ---"]
@@ -78,14 +84,16 @@ def main() -> None:
     detection_files = sorted(EXPLANATIONS_DIR.glob("detections_*.json"), reverse=True)
     detections_doc = load_json(detection_files[0], default={"detections": []}) if detection_files else {"detections": []}
     detections = detections_doc.get("detections", [])
+    fallback_mode = detections_doc.get("metadata", {}).get("fallback_mode", False)
 
     explanations_doc = load_json(EXPLANATIONS_DIR / "xai_explanations.json", default={"explanations": []})
     explanations = explanations_doc.get("explanations", [])
+    fallback_mode = fallback_mode or explanations_doc.get("metadata", {}).get("fallback_mode", False)
 
     sections = [
-        render_metrics(detections),
-        render_alerts(detections),
-        render_explanations(explanations),
+        render_metrics(detections, fallback_mode),
+        render_alerts(detections, fallback_mode),
+        render_explanations(explanations, fallback_mode),
         render_audit(),
     ]
     print("\n\n".join(sections))

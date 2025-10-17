@@ -49,12 +49,40 @@ class PipelineIntegrationTest(unittest.TestCase):
         detections = json.loads(detection_path.read_text(encoding="utf-8"))
         self.assertIn("detections", detections)
         self.assertGreater(len(detections["detections"]), 0)
+        self.assertFalse(detections["metadata"]["fallback_mode"])
 
         explanations_path = generate_explanations(self.data_path, self.config_path, detection_path)
         self.assertTrue(explanations_path.exists())
         explanations = json.loads(explanations_path.read_text(encoding="utf-8"))
         self.assertIn("explanations", explanations)
         self.assertEqual(len(explanations["explanations"]), len(detections["detections"]))
+        self.assertFalse(explanations["metadata"]["fallback_mode"])
+
+    def test_train_with_empty_dataset_creates_default_model(self) -> None:
+        empty_csv = self.tmp_path / "empty.csv"
+        empty_csv.write_text("ip,hostname,port,state,service,product\n", encoding="utf-8")
+
+        model_path = train_model(empty_csv, self.config_path)
+        self.assertTrue(model_path.exists())
+
+        baseline = json.loads(model_path.read_text(encoding="utf-8"))
+        self.assertEqual(baseline["totals"]["records"], 0)
+        self.assertEqual(baseline["port_counts"], {})
+
+    def test_detection_in_fallback_mode_marks_events_as_informational(self) -> None:
+        empty_csv = self.tmp_path / "empty.csv"
+        empty_csv.write_text("ip,hostname,port,state,service,product\n", encoding="utf-8")
+        train_model(empty_csv, self.config_path)
+
+        detections_path = detect(self.data_path, self.config_path)
+        detections = json.loads(detections_path.read_text(encoding="utf-8"))
+
+        self.assertTrue(detections["metadata"]["fallback_mode"])
+        severities = {item["severity"] for item in detections["detections"]}
+        predictions = {item["prediction"] for item in detections["detections"]}
+
+        self.assertEqual(severities, {"info"})
+        self.assertEqual(predictions, {False})
 
 
 if __name__ == "__main__":

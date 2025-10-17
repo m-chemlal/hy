@@ -23,6 +23,30 @@ def read_csv_rows(path: Path) -> Iterable[Dict[str, str]]:
             yield row
 
 
+def _empty_baseline() -> Dict[str, Dict[str, int]]:
+    """Return a baseline structure populated with safe defaults.
+
+    When no historical scan data is available we still want to create a model
+    file so that downstream commands (``make detect`` / ``make xai``) can run
+    without crashing.  The counters are left empty and the ``totals`` section
+    is initialised with ``1`` so the scoring code never divides by zero.
+    """
+
+    return {
+        "totals": {
+            "records": 0,
+            "max_port_count": 1,
+            "max_service_count": 1,
+            "max_product_count": 1,
+            "max_combo_count": 1,
+        },
+        "port_counts": {},
+        "service_counts": {},
+        "product_counts": {},
+        "combo_counts": {},
+    }
+
+
 def build_baseline(rows: Iterable[Dict[str, str]]) -> Dict[str, Dict[str, int]]:
     port_counts: Counter[str] = Counter()
     service_counts: Counter[str] = Counter()
@@ -63,9 +87,16 @@ def train_model(data_path: Path, settings_path: Path) -> Path:
 
     rows = list(read_csv_rows(data_path))
     if not rows:
-        raise ValueError("No data available to train the baseline model.")
+        baseline = _empty_baseline()
+        print(f"No records found in {data_path}. Generated fallback baseline.")
+    else:
+        baseline = build_baseline(rows)
 
-    baseline = build_baseline(rows)
+    baseline["metadata"] = {
+        "source": str(data_path),
+        "records": len(rows),
+        "fallback": not rows,
+    }
     with model_path.open("w", encoding="utf-8") as fh:
         json.dump(baseline, fh, indent=2)
 
