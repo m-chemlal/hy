@@ -1,19 +1,22 @@
 """Notification utilities for TRUSTED AI SOC LITE."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import smtplib
 from email.message import EmailMessage
-from pathlib import Path
 
-import yaml
-
+from config.loader import load_settings
 from logs.audit import AuditLogger
 
 
 def send_email(subject: str, body: str, settings_path: Path = Path("config/settings.yaml")) -> None:
-    with settings_path.open("r", encoding="utf-8") as fh:
-        settings = yaml.safe_load(fh) or {}
+    settings = load_settings(settings_path)
     email_conf = settings.get("response", {}).get("email", {})
     logger = AuditLogger(settings_path)
 
@@ -30,7 +33,8 @@ def send_email(subject: str, body: str, settings_path: Path = Path("config/setti
     try:
         with smtplib.SMTP(email_conf["smtp_server"], email_conf.get("smtp_port", 587)) as smtp:
             smtp.starttls()
-            smtp.login(email_conf["username"], email_conf.get("password", ""))
+            if email_conf.get("password"):
+                smtp.login(email_conf["username"], email_conf.get("password", ""))
             smtp.send_message(message)
         logger.log_event("notification_sent", {"subject": subject})
     except Exception as exc:  # pragma: no cover - network side effects

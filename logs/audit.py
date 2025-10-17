@@ -6,15 +6,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
+from config.loader import load_settings
 
 
 class AuditLogger:
     """Lightweight audit logger storing events both in JSON and NDJSON."""
 
     def __init__(self, settings_path: Path = Path("config/settings.yaml")) -> None:
-        with settings_path.open("r", encoding="utf-8") as fh:
-            settings = yaml.safe_load(fh) or {}
+        settings = load_settings(settings_path)
         audit_conf = settings.get("audit", {})
         self.audit_path = Path(audit_conf.get("audit_log", "logs/audit.json"))
         self.audit_path.parent.mkdir(parents=True, exist_ok=True)
